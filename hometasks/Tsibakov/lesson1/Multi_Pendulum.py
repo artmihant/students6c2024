@@ -72,10 +72,13 @@ def update(frame):
 
 Animation = FuncAnimation(Fig, update, frames=StepsNumber, init_func=init, blit=True, interval=DeltaT*1000)
 
-print('save')
-
+print('Save HTML')
 Animation.save(filename="multi_pendulum.html", writer="html")
+
+print('Save MKV')
 Animation.save(filename="multi_pendulum.mkv", writer="ffmpeg")
+
+print('Save GIF')
 Animation.save(filename="multi_pendulum.gif", writer="pillow")
 
-plt.show()
+# plt.show()
