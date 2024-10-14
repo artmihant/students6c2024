@@ -13,7 +13,7 @@ T_max   = 4.1*(PendulumNumber-1) # 4.1 подобрано так, что бы п
 DeltaT      = 0.05
 StepsNumber = int(T_max / DeltaT)
 
-PendulumLengths = (2*(PendulumNumber-1)/np.arange(PendulumNumber-1,2*PendulumNumber-1))**2 # Длины маятников подчиняются формуле гармонического ряда
+PendulumLengths = (2*(PendulumNumber-1)/np.arange(PendulumNumber-1,2*PendulumNumber-1))**2 # Периоды маятников подчиняются формуле гармонического ряда
 
 StateHistory = np.zeros((StepsNumber+1, 2, PendulumNumber)) 
 
@@ -35,7 +35,6 @@ def RK4_step(s):
 
     return s + ( d1 + 2*d2 + 2*d3 + d4 )/6
 
-# Explicit Euler 
 for i in range(StepsNumber):
     StateHistory[i+1] = RK4_step(StateHistory[i])
 
