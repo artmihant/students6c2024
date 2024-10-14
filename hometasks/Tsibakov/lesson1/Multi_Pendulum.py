@@ -8,7 +8,6 @@ G = 9.81
 PendulumNumber = 13
 
 T_max   = 4.1*(PendulumNumber-1) # 4.1 подобрано так, что бы при G = 9.81 при любом PendulumNumber давать нечто близкое к целому циклу
-# T_max   = 10
 
 DeltaT      = 0.05
 StepsNumber = int(T_max / DeltaT)
@@ -17,7 +16,7 @@ PendulumLengths = (2*(PendulumNumber-1)/np.arange(PendulumNumber-1,2*PendulumNum
 
 StateHistory = np.zeros((StepsNumber+1, 2, PendulumNumber)) 
 
-StateHistory[0, 0] = np.pi / 6  # Pendulum initial angle
+StateHistory[0, 0] = np.pi / 6  # Начальный угол отклонения
 
 
 def D(s):
@@ -27,7 +26,6 @@ def D(s):
 
 
 def RK4_step(s):
-    #RK4
     d1 = DeltaT*D(s)
     d2 = DeltaT*D(s+d1/2)
     d3 = DeltaT*D(s+d2/2)
@@ -47,7 +45,7 @@ Ax.set_xlim(-2.5, 2.5)
 Ax.set_ylim(-4.5, 0.5)
 Ax.grid(color = 'black', alpha = 0.25)
 
-# Pendulum colors
+# Цвета маятников
 CMap = get_cmap('winter')
 Colors = [CMap(i / (PendulumNumber - 1)) for i in range(PendulumNumber)]  
 
