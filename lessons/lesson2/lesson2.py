@@ -8,7 +8,7 @@ import matplotlib.animation as animation
 L1 = 1
 L2 = 1
 M1 = 1
-M2 = 1
+M2 = 0.01
 
 G = 1
 
@@ -46,7 +46,7 @@ def D(s):
         -M2*G*L2*np.sin(q2) + h1 - h2*np.sin(2*(q1-q2))
     ))
 
-Q1_0 = 0
+Q1_0 = 1
 Q2_0 = 1
 P1_0 = 0
 P2_0 = 0
