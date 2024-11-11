@@ -1,117 +1,154 @@
-import numpy, matplotlib.pyplot, matplotlib.animation
+import matplotlib.pyplot, matplotlib.animation
+import numpy as np
+
 
 # Define constants:
-height = 80							# lattice dimensions
+height = 80                            # размеры решетки
 width = 200
-viscosity = 0.02					# fluid viscosity
-omega = 1 / (3*viscosity + 0.5)		# "relaxation" parameter
-u0 = 0.1							# initial and in-flow speed
-four9ths = 4.0/9.0					# abbreviations for lattice-Boltzmann weight factors
+viscosity = 0.02                    # вязкость жидкости
+omega = 1 / (3*viscosity + 0.5)        # параметр "релаксации"
+u_0 = np.array([0.1, 0])                            # начальная и входящая скорость
+
+u0 = 0.1
+
+four9ths = 4.0/9.0                    # abbreviations for lattice-Boltzmann weight factors
 one9th   = 1.0/9.0
 one36th  = 1.0/36.0
 
-# Initialize all the arrays to steady rightward flow:
-n0 = four9ths * (numpy.ones((height,width)) - 1.5*u0**2)	# particle densities along 9 directions
-nN = one9th * (numpy.ones((height,width)) - 1.5*u0**2)
-nS = one9th * (numpy.ones((height,width)) - 1.5*u0**2)
-nE = one9th * (numpy.ones((height,width)) + 3*u0 + 4.5*u0**2 - 1.5*u0**2)
-nW = one9th * (numpy.ones((height,width)) - 3*u0 + 4.5*u0**2 - 1.5*u0**2)
-nNE = one36th * (numpy.ones((height,width)) + 3*u0 + 4.5*u0**2 - 1.5*u0**2)
-nSE = one36th * (numpy.ones((height,width)) + 3*u0 + 4.5*u0**2 - 1.5*u0**2)
-nNW = one36th * (numpy.ones((height,width)) - 3*u0 + 4.5*u0**2 - 1.5*u0**2)
-nSW = one36th * (numpy.ones((height,width)) - 3*u0 + 4.5*u0**2 - 1.5*u0**2)
+density = 1
 
-rho = n0 + nN + nS + nE + nW + nNE + nSE + nNW + nSW		# macroscopic density
-ux = (nE + nNE + nSE - nW - nNW - nSW) / rho				# macroscopic x velocity
-uy = (nN + nNE + nNW - nS - nSE - nSW) / rho				# macroscopic y velocity
+f = np.ones((9, height, width))
 
+dir_template = np.array([
+    [-1,1],[0,1],[1,1],
+    [-1,0],[0,0],[1,0],
+    [-1,-1],[0,-1],[1,-1]
+])
+
+coef_template = np.array([
+    1/36,1/9,1/36,
+    1/9, 4/9, 1/9,
+    1/36,1/9,1/36
+]).reshape(9,1,1)
+
+u_dir_temp = (dir_template@u_0).reshape(9,1,1)
+
+f = density * coef_template*(f + 3*u_dir_temp + 4.5*u_dir_temp@u_dir_temp - 1.5*u_0@u_0)
+
+# Инициализируем все массивы для обеспечения равномерного правого потока
+
+(fNW, fN, fNE, fW, f0, fE, fSW, fS, fSE) = f
+
+Rho = f.sum(axis=0) 
+dd = dir_template.T[0]
+
+U_ = (f.T@dir_template).T/Rho
+(U_x, U_y) = U_
+
+# U_x = f_
+
+Ux = (fE + fNE + fSE - fW - fNW - fSW) / Rho                # macroscopic x velocity
+Uy = (fN + fNE + fNW - fS - fSE - fSW) / Rho                # macroscopic y velocity
 
 # Initialize barriers:
-barrier = numpy.zeros((height,width), bool)					# True wherever there's a barrier
-barrier[((height//2)-8):((height//2)+8), height//2] = True			# simple linear barrier
-barrierN = numpy.roll(barrier,  1, axis=0)					# sites just north of barriers
-barrierS = numpy.roll(barrier, -1, axis=0)					# sites just south of barriers
-barrierE = numpy.roll(barrier,  1, axis=1)					# etc.
-barrierW = numpy.roll(barrier, -1, axis=1)
-barrierNE = numpy.roll(barrierN,  1, axis=1)
-barrierNW = numpy.roll(barrierN, -1, axis=1)
-barrierSE = numpy.roll(barrierS,  1, axis=1)
-barrierSW = numpy.roll(barrierS, -1, axis=1)
+barrier = np.zeros((height,width), bool)                    # True wherever there's a barrier
+barrier[((height//2)-8):((height//2)+8), height//2] = True            # simple linear barrier
+barrierN = np.roll(barrier,  1, axis=0)                    # sites just north of barriers
+barrierS = np.roll(barrier, -1, axis=0)                    # sites just south of barriers
+barrierE = np.roll(barrier,  1, axis=1)                    # etc.
+barrierW = np.roll(barrier, -1, axis=1)
+barrierNE = np.roll(barrierN,  1, axis=1)
+barrierNW = np.roll(barrierN, -1, axis=1)
+barrierSE = np.roll(barrierS,  1, axis=1)
+barrierSW = np.roll(barrierS, -1, axis=1)
 
 # Move all particles by one step along their directions of motion (pbc):
 def stream():
-	global nN, nS, nE, nW, nNE, nNW, nSE, nSW
-	nN  = numpy.roll(nN,   1, axis=0)	# axis 0 is north-south; + direction is north
-	nNE = numpy.roll(nNE,  1, axis=0)
-	nNW = numpy.roll(nNW,  1, axis=0)
-	nS  = numpy.roll(nS,  -1, axis=0)
-	nSE = numpy.roll(nSE, -1, axis=0)
-	nSW = numpy.roll(nSW, -1, axis=0)
-	nE  = numpy.roll(nE,   1, axis=1)	# axis 1 is east-west; + direction is east
-	nNE = numpy.roll(nNE,  1, axis=1)
-	nSE = numpy.roll(nSE,  1, axis=1)
-	nW  = numpy.roll(nW,  -1, axis=1)
-	nNW = numpy.roll(nNW, -1, axis=1)
-	nSW = numpy.roll(nSW, -1, axis=1)
-	# Use tricky boolean arrays to handle barrier collisions (bounce-back):
-	nN[barrierN] = nS[barrier]
-	nS[barrierS] = nN[barrier]
-	nE[barrierE] = nW[barrier]
-	nW[barrierW] = nE[barrier]
-	nNE[barrierNE] = nSW[barrier]
-	nNW[barrierNW] = nSE[barrier]
-	nSE[barrierSE] = nNW[barrier]
-	nSW[barrierSW] = nNE[barrier]
-		
+    global fN, fS, fE, fW, fNE, fNW, fSE, fSW
+
+    f = np.array([fNW, fN, fNE, fW, f0, fE, fSW, fS, fSE])
+
+    fN  = np.roll(fN,   1, axis=0)    # axis 0 is north-south; + direction is north
+
+    fNE = np.roll(fNE,  1, axis=0)
+    fNW = np.roll(fNW,  1, axis=0)
+    fS  = np.roll(fS,  -1, axis=0)
+
+    fSE = np.roll(fSE, -1, axis=0)
+    fSW = np.roll(fSW, -1, axis=0)
+
+    fE  = np.roll(fE,   1, axis=1)    # axis 1 is east-west; + direction is east
+
+    fNE = np.roll(fNE,  1, axis=1)
+    fSE = np.roll(fSE,  1, axis=1)
+
+    fW  = np.roll(fW,  -1, axis=1)
+
+    fNW = np.roll(fNW, -1, axis=1)
+    fSW = np.roll(fSW, -1, axis=1)
+
+    # Use tricky boolean arrays to handle barrier collisions (bounce-back):
+
+    fN[barrierN] = fS[barrier]
+    fS[barrierS] = fN[barrier]
+    fE[barrierE] = fW[barrier]
+    fW[barrierW] = fE[barrier]
+    fNE[barrierNE] = fSW[barrier]
+    fNW[barrierNW] = fSE[barrier]
+    fSE[barrierSE] = fNW[barrier]
+    fSW[barrierSW] = fNE[barrier]
+        
 # Collide particles within each cell to redistribute velocities (could be optimized a little more):
 def collide():
-	global rho, ux, uy, n0, nN, nS, nE, nW, nNE, nNW, nSE, nSW
-	rho = n0 + nN + nS + nE + nW + nNE + nSE + nNW + nSW
-	ux = (nE + nNE + nSE - nW - nNW - nSW) / rho
-	uy = (nN + nNE + nNW - nS - nSE - nSW) / rho
-	ux2 = ux * ux				# pre-compute terms used repeatedly...
-	uy2 = uy * uy
-	u2 = ux2 + uy2
-	omu215 = 1 - 1.5*u2			# "one minus u2 times 1.5"
-	uxuy = ux * uy
-	n0 = (1-omega)*n0 + omega * four9ths * rho * omu215
-	nN = (1-omega)*nN + omega * one9th * rho * (omu215 + 3*uy + 4.5*uy2)
-	nS = (1-omega)*nS + omega * one9th * rho * (omu215 - 3*uy + 4.5*uy2)
-	nE = (1-omega)*nE + omega * one9th * rho * (omu215 + 3*ux + 4.5*ux2)
-	nW = (1-omega)*nW + omega * one9th * rho * (omu215 - 3*ux + 4.5*ux2)
-	nNE = (1-omega)*nNE + omega * one36th * rho * (omu215 + 3*(ux+uy) + 4.5*(u2+2*uxuy))
-	nNW = (1-omega)*nNW + omega * one36th * rho * (omu215 + 3*(-ux+uy) + 4.5*(u2-2*uxuy))
-	nSE = (1-omega)*nSE + omega * one36th * rho * (omu215 + 3*(ux-uy) + 4.5*(u2-2*uxuy))
-	nSW = (1-omega)*nSW + omega * one36th * rho * (omu215 + 3*(-ux-uy) + 4.5*(u2+2*uxuy))
-	# Force steady rightward flow at ends (no need to set 0, N, and S components):
-	nE[:,0] = one9th * (1 + 3*u0 + 4.5*u0**2 - 1.5*u0**2)
-	nW[:,0] = one9th * (1 - 3*u0 + 4.5*u0**2 - 1.5*u0**2)
-	nNE[:,0] = one36th * (1 + 3*u0 + 4.5*u0**2 - 1.5*u0**2)
-	nSE[:,0] = one36th * (1 + 3*u0 + 4.5*u0**2 - 1.5*u0**2)
-	nNW[:,0] = one36th * (1 - 3*u0 + 4.5*u0**2 - 1.5*u0**2)
-	nSW[:,0] = one36th * (1 - 3*u0 + 4.5*u0**2 - 1.5*u0**2)
+    global Rho, Ux, Uy, f0, fN, fS, fE, fW, fNE, fNW, fSE, fSW
+
+    f = np.array([fNW, fN, fNE, fW, f0, fE, fSW, fS, fSE])
+
+    Rho = f.sum(axis=0) 
+    (Ux, Uy) = (f.T@dir_template).T/Rho
+
+    ux2 = Ux * Ux                # pre-compute terms used repeatedly...
+    uy2 = Uy * Uy
+    u2 = ux2 + uy2
+    omu215 = 1 - 1.5*u2            # "one minus u2 times 1.5"
+    uxuy = Ux * Uy
+    f0 = (1-omega)*f0 + omega * four9ths * Rho * omu215
+    fN = (1-omega)*fN + omega * one9th * Rho * (omu215 + 3*Uy + 4.5*uy2)
+    fS = (1-omega)*fS + omega * one9th * Rho * (omu215 - 3*Uy + 4.5*uy2)
+    fE = (1-omega)*fE + omega * one9th * Rho * (omu215 + 3*Ux + 4.5*ux2)
+    fW = (1-omega)*fW + omega * one9th * Rho * (omu215 - 3*Ux + 4.5*ux2)
+    fNE = (1-omega)*fNE + omega * one36th * Rho * (omu215 + 3*(Ux+Uy) + 4.5*(u2+2*uxuy))
+    fNW = (1-omega)*fNW + omega * one36th * Rho * (omu215 + 3*(-Ux+Uy) + 4.5*(u2-2*uxuy))
+    fSE = (1-omega)*fSE + omega * one36th * Rho * (omu215 + 3*(Ux-Uy) + 4.5*(u2-2*uxuy))
+    fSW = (1-omega)*fSW + omega * one36th * Rho * (omu215 + 3*(-Ux-Uy) + 4.5*(u2+2*uxuy))
+    # Force steady rightward flow at ends (no need to set 0, N, and S components):
+    fE[:,0] = one9th * (1 + 3*u0 + 4.5*u0**2 - 1.5*u0**2)
+    fW[:,0] = one9th * (1 - 3*u0 + 4.5*u0**2 - 1.5*u0**2)
+    fNE[:,0] = one36th * (1 + 3*u0 + 4.5*u0**2 - 1.5*u0**2)
+    fSE[:,0] = one36th * (1 + 3*u0 + 4.5*u0**2 - 1.5*u0**2)
+    fNW[:,0] = one36th * (1 - 3*u0 + 4.5*u0**2 - 1.5*u0**2)
+    fSW[:,0] = one36th * (1 - 3*u0 + 4.5*u0**2 - 1.5*u0**2)
 
 # Compute curl of the macroscopic velocity field:
 def curl(ux, uy):
-	return numpy.roll(uy,-1,axis=1) - numpy.roll(uy,1,axis=1) - numpy.roll(ux,-1,axis=0) + numpy.roll(ux,1,axis=0)
+    return np.roll(uy,-1,axis=1) - np.roll(uy,1,axis=1) - np.roll(ux,-1,axis=0) + np.roll(ux,1,axis=0)
 
 
 # Here comes the graphics and animation...
 theFig = matplotlib.pyplot.figure(figsize=(8,3))
-fluidImage = matplotlib.pyplot.imshow(curl(ux, uy), origin='lower', norm=matplotlib.pyplot.Normalize(-.1,.1), 
-									cmap=matplotlib.pyplot.get_cmap('jet'), interpolation='none')
-		# See http://www.loria.fr/~rougier/teaching/matplotlib/#colormaps for other cmap options
-bImageArray = numpy.zeros((height, width, 4), numpy.uint8)	# an RGBA image
-bImageArray[barrier,3] = 255								# set alpha=255 only at barrier sites
+fluidImage = matplotlib.pyplot.imshow(curl(Ux, Uy), origin='lower', norm=matplotlib.pyplot.Normalize(-.1,.1), 
+                                    cmap=matplotlib.pyplot.get_cmap('jet'), interpolation='none')
+        # See http://www.loria.fr/~rougier/teaching/matplotlib/#colormaps for other cmap options
+bImageArray = np.zeros((height, width, 4), np.uint8)    # an RGBA image
+bImageArray[barrier,3] = 255                                # set alpha=255 only at barrier sites
 barrierImage = matplotlib.pyplot.imshow(bImageArray, origin='lower', interpolation='none')
 
 
-def nextFrame(arg):							# (arg is the frame number, which we don't need)
-	for step in range(20):					# adjust number of steps for smooth animation
-		stream()
-		collide()
-	fluidImage.set_array(curl(ux, uy))
-	return (fluidImage, barrierImage)		# return the figure elements to redraw
+def nextFrame(arg):                            # (arg is the frame number, which we don't need)
+    stream()
+    collide()
+    fluidImage.set_array(curl(Ux, Uy))
+    return (fluidImage, barrierImage)        # return the figure elements to redraw
 
 animate = matplotlib.animation.FuncAnimation(theFig, nextFrame, interval=1, blit=True)
 matplotlib.pyplot.show()
