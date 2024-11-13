@@ -1,13 +1,12 @@
-import matplotlib.pyplot, matplotlib.animation
+import time
+import matplotlib.pyplot as plt, matplotlib.animation
 import numpy as np
+import numba as nb
 
-# Зададим константы
+""" Зададим константы и свойства задачи """
 
-Viscosity = 0.02                                # вязкость жидкости
-
-Height = 80                                     # размеры решетки
-Width = 200
-Radius = Height//10
+Viscosity = 0.01                                # вязкость жидкости
+Height, Width = 80, 200,                          # размеры решетки
 
 U0 = np.array([0.15, 0])                        # начальная и внешняя скорость (в махах)
 
@@ -15,149 +14,201 @@ Ux  = np.zeros((Height, Width)) + U0[0]
 Uy  = np.zeros((Height, Width)) + U0[1]
 Rho = np.ones((Height, Width))
 
-# Зададим свойства шаблона решетки
+Ux0  = np.zeros((Height, Width)) + U0[0]
+Uy0  = np.zeros((Height, Width)) + U0[1]
+Rho0 = np.ones((Height, Width))
 
-V = np.array([
-    [-1,1],[0,1],[1,1],
-    [-1,0],[0,0],[1,0],
-    [-1,-1],[0,-1],[1,-1]
-]).reshape((9,2,1,1))
+def BarrierShape():
+    """ Инициализируем форму барьера. Необходимо установить True там, где барьер """
+    barrier = np.zeros((Height, Width), bool)
 
-
-CoefTemp = np.array([
-    1/36,1/9,1/36,
-    1/9, 4/9, 1/9,
-    1/36,1/9,1/36
-]).reshape((9,1,1))
-
-C = 1/3**0.5
-Tau = Viscosity/C**2 + 0.5                     # параметр релаксации
-
-def F_stat(Ux, Uy, Rho):
-    UV = (V[:,0]*Ux + V[:,1]*Uy)/C**2
-    U2 = (Ux**2 + Uy**2)/C**2
-    return Rho * CoefTemp * (1 + UV + UV**2/2 - U2/2)
-
-def U_Rho(f):
-    Rho = f.sum(axis=0)
-    Ux = ((V[:,0]*f)).sum(axis=0)/Rho
-    Uy = ((V[:,1]*f)).sum(axis=0)/Rho
-    return Ux, Uy, Rho  
-
-F = F_stat(Ux, Uy, Rho)
-F_0 = F_stat(Ux, Uy, Rho)
-
-
-def InitBarrier():
-    # Инициализируем форму барьера
-    barrier = np.zeros((Height,Width), bool)                    
-
-    # True там где барьер
     # круг
     for i in range(barrier.shape[0]):
         for j in range(barrier.shape[1]):
-            if (i - Height//2)**2 + (j - Height//2)**2 < Radius**2:
+            if (i - Height//2)**2 + (j - Height//2)**2 < (Height//10)**2:
                 barrier[i,j] = True
     # хвост
-    # barrier[(Height//2), ((Height//2)):((Height//2)+4*Radius)] = True            # simple linear barrier
+    barrier[(Height//2), ((Height//2)):((Height//2)+4*(Height//10))] = True
 
     return barrier
 
 
-barrier = InitBarrier()
+""" Зададим свойства шаблона решетки D2Q9 """
 
-barrierN = np.roll(barrier,  1, axis=0)                    
-barrierS = np.roll(barrier, -1, axis=0)                    
-barrierE = np.roll(barrier,  1, axis=1)                    
-barrierW = np.roll(barrier, -1, axis=1)
-barrierNE = np.roll(barrierN,  1, axis=1)
-barrierNW = np.roll(barrierN, -1, axis=1)
-barrierSE = np.roll(barrierS,  1, axis=1)
-barrierSW = np.roll(barrierS, -1, axis=1)
+D = 2 # Мерность модели
+Q = 9 # число точек в шаблоне
 
+V = np.array([
+    [-1, 1],[ 0, 1],[ 1, 1],
+    [-1, 0],[ 0, 0],[ 1, 0],
+    [-1,-1],[ 0,-1],[ 1,-1]
+])
 
-# Переместить все частицы на один шаг вдоль направления их движения (pbc):
-def stream(f):
+W = np.array([
+    1/36, 1/9, 1/36,
+    1/9,  4/9, 1/9,
+    1/36, 1/9, 1/36
+])
 
-    (fNW, fN, fNE, fW, f0, fE, fSW, fS, fSE) = f
-
-    # fN[1:,:] = fN[:-1,:]
-
-    fN  = np.roll(fN,   1, axis=0)    # axis 0 is north-south; + direction is north
-
-    fNE = np.roll(fNE,  1, axis=0)
-    fNW = np.roll(fNW,  1, axis=0)
-    fS  = np.roll(fS,  -1, axis=0)
-
-    fSE = np.roll(fSE, -1, axis=0)
-    fSW = np.roll(fSW, -1, axis=0)
-
-    fE  = np.roll(fE,   1, axis=1)    # axis 1 is east-west; + direction is east
-
-    fNE = np.roll(fNE,  1, axis=1)
-    fSE = np.roll(fSE,  1, axis=1)
-
-    fW  = np.roll(fW,  -1, axis=1)
-
-    fNW = np.roll(fNW, -1, axis=1)
-    fSW = np.roll(fSW, -1, axis=1)
+C = 1/3**0.5  # Скорость звука в модели
 
 
-    fN[barrierN] = fS[barrier]
-    fS[barrierS] = fN[barrier]
-    fE[barrierE] = fW[barrier]
-    fW[barrierW] = fE[barrier]
-    fNE[barrierNE] = fSW[barrier]
-    fNW[barrierNW] = fSE[barrier]
-    fSE[barrierSE] = fNW[barrier]
-    fSW[barrierSW] = fNE[barrier]
-        
-    f[:] = np.array([fNW, fN, fNE, fW, f0, fE, fSW, fS, fSE])
-    return f
+def InitBarrier():
+    """ Создаем барьер и отталкивающие границы барьера """
+    barrierC = BarrierShape()
 
-# Сталкиваем частицы внутри каждой ячейки, чтобы перераспределить скорости
-def collide(f):
+    barrierN = np.roll(barrierC,  1, axis=0)
+    barrierS = np.roll(barrierC, -1, axis=0)
+    barrierE = np.roll(barrierC,  1, axis=1)
+    barrierW = np.roll(barrierC, -1, axis=1)
+    barrierNE = np.roll(barrierN,  1, axis=1)
+    barrierNW = np.roll(barrierN, -1, axis=1)
+    barrierSE = np.roll(barrierS,  1, axis=1)
+    barrierSW = np.roll(barrierS, -1, axis=1)
 
-    Ux, Uy, Rho = U_Rho(f)
+    return np.array([
+        barrierNW, barrierN, barrierNE,
+        barrierW,  barrierC, barrierE,
+        barrierSW, barrierS, barrierSE
+    ])
 
-    f -= (f - F_stat(Ux, Uy, Rho))/Tau
 
-    f[:,0,:] = F_0[:,0,:]
-    f[:,-1,:] = F_0[:,-1,:]
-    f[:,:,0] = F_0[:,:,0]
-    f[:,:,-1] = F_0[:,:,-1]
+def F_stat(Ux, Uy, Rho):
+    """ Вычисляем статистическое распределение частиц в зависимости от общей скорости и плотности """
+    UV = np.zeros((9, Height, Width)) 
+    for i in range(9):
+        UV[i] = (V[i,0]*Ux + V[i,1]*Uy)/C**2
 
-    return f
+    U2 = (Ux**2 + Uy**2)/C**2
 
-# Вычислить ротор макроскопического поля скорости:
+    f_stat = np.zeros((9, Height, Width))
+    for i in range(9):
+        f_stat[i] = Rho * W[i] * (1 + UV[i] + UV[i]**2/2 - U2/2)
+
+    return f_stat
+
+def Mode0(f):
+    """ Плотность """
+    mode = np.zeros((Height, Width))
+    for i in range(9):
+        mode += f[i]
+    return mode
+
+def Mode1(f):
+    """ Плотность*Скорость """
+    mode = np.zeros((2, Height, Width))
+    for i in range(9):
+        for d1 in range(2):
+            mode[d1] += f[i]*V[i,d1]
+    return mode
+
+def Mode2(f):
+    """ Плотность*[Скорость x Скорость] минус тензор напряжения """
+    mode = np.zeros((2,2,Height, Width))
+    for i in range(9):
+        for d1 in range(2):
+            for d2 in range(2):
+                mode[d1,d2] += f[i]*V[i,d1]*V[i,d2]
+    return mode
+
+
+def iter(f, f_out, barrier):
+    """stream"""
+    (fNW, fN, fNE, fW, fC, fE, fSW, fS, fSE) = f
+
+    for y in range(Height-1,0,-1):
+        fN[y]  = fN[y-1]
+        fNE[y] = fNE[y-1]
+        fNW[y] = fNW[y-1]
+
+    for y in range(0,Height-1):
+        fS[y]  = fS[y+1]
+        fSE[y] = fSE[y+1]
+        fSW[y] = fSW[y+1]
+
+    for x in range(Width-1,0,-1):
+        fE[:,x]  = fE[:,x-1]
+        fNE[:,x] = fNE[:,x-1]
+        fSE[:,x] = fSE[:,x-1]
+
+    for x in range(0,Width-1):
+        fW[:,x]  = fW[:,x+1]
+        fNW[:,x] = fNW[:,x+1]
+        fSW[:,x] = fSW[:,x+1]
+
+    """ BC_barrier """
+    (bNW, bN, bNE, bW, bC, bE, bSW, bS, bSE) = barrier
+
+    fN[bN]   = fS[bC]
+    fS[bS]   = fN[bC]
+    fE[bE]   = fW[bC]
+    fW[bW]   = fE[bC]
+    fNE[bNE] = fSW[bC]
+    fNW[bNW] = fSE[bC]
+    fSE[bSE] = fNW[bC]
+    fSW[bSW] = fNE[bC]
+
+    """ Calc U, Rho """
+    Rho = Mode0(f)
+
+    Ux, Uy = Mode1(f)
+    Ux /= Rho
+    Uy /= Rho
+
+    """ Collide """
+
+    f += (F_stat(Ux, Uy, Rho)-f)/(0.5 + Viscosity/C**2)
+
+    """ BC_out """
+
+    f[:,0,:] = f_out[:,0,:]
+    f[:,-1,:] = f_out[:,-1,:]
+    f[:,:,0] = f_out[:,:,0]
+    f[:,:,-1] = f_out[:,:,-1]
+
+
 def curl(ux, uy):
-    ux = ux.reshape((Height, Width))
-    uy = uy.reshape((Height, Width))
+    """ двумерный ротор макроскопического поля скорости """ 
     return np.roll(uy,-1,axis=1) - np.roll(uy,1,axis=1) - np.roll(ux,-1,axis=0) + np.roll(ux,1,axis=0)
 
+def main():
 
-theFig = matplotlib.pyplot.figure(figsize=(8,3))
-fluidImage = matplotlib.pyplot.imshow(curl(Ux, Uy), origin='lower', norm=matplotlib.pyplot.Normalize(-.1,.1), 
-                                    cmap=matplotlib.pyplot.get_cmap('jet'), interpolation='none')
+    barrier = InitBarrier()
 
-bImageArray = np.zeros((Height, Width, 4), np.uint8)
-bImageArray[barrier,3] = 255                              
-barrierImage = matplotlib.pyplot.imshow(bImageArray, origin='lower', interpolation='none')
+    F = F_stat(Ux, Uy, Rho)
+
+    F_out = F_stat(Ux, Uy, Rho)
+
+    fig, ax = plt.subplots()
+
+    fluidImage = ax.imshow(curl(Ux, Uy), origin='lower', norm=plt.Normalize(-.1,.1), 
+                                        cmap=plt.get_cmap('jet'), interpolation='none')
+
+    bImageArray = np.zeros((Height, Width, 4), np.uint8)
+    bImageArray[barrier[4],3] = 100
+    barrierImage = plt.imshow(bImageArray, origin='lower', interpolation='none')
 
 
-def nextFrame(arg):
-    global F      
+    def nextFrame(_):
 
-    for i in range(20):
-        F = stream(F)
-        F = collide(F)
-    
+        for i in range(40):
+            iter(F, F_out, barrier)
 
-    # print(F.min(), F.max())
-    Ux, Uy, Rho =  U_Rho(F)
+        Rho = Mode0(F)
+        Ux, Uy = Mode1(F)
 
-    fluidImage.set_array(curl(Ux, Uy))
-    return (fluidImage, barrierImage)        
+        E = Mode2(F)
+        Ux /= Rho
+        Uy /= Rho
 
-animate = matplotlib.animation.FuncAnimation(theFig, nextFrame, interval=1, blit=True)
-matplotlib.pyplot.show()
+        fluidImage.set_array(curl(Ux, Uy))
+        return (fluidImage, barrierImage)        
+
+    animate = matplotlib.animation.FuncAnimation(fig, nextFrame, interval=1, blit=True)
+    plt.show()
+
+
+
+if __name__ == '__main__':
+    main()
+
