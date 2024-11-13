@@ -176,7 +176,7 @@ def main():
     barrier = InitBarrier()
 
     F = F_stat(Ux, Uy, Rho)
-
+lesson5/fluid/fluidLBM.py
     F_out = F_stat(Ux, Uy, Rho)
 
     fig, ax = plt.subplots()
