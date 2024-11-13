@@ -2,13 +2,14 @@ import matplotlib.pyplot, matplotlib.animation
 import numpy as np
 
 # Зададим константы
-Height = 80                                        # размеры решетки
+
+Viscosity = 0.02                                # вязкость жидкости
+
+Height = 80                                     # размеры решетки
 Width = 200
 Radius = Height//10
 
-Viscosity = 0.02                                   # вязкость жидкости
-Tau = 1 / (3*Viscosity + 0.5)                      # параметр релаксации
-U0 = np.array([0.15, 0])                           # начальная и входящая скорость
+U0 = np.array([0.15, 0])                        # начальная и внешняя скорость (в махах)
 
 Ux  = np.zeros((Height, Width)) + U0[0]
 Uy  = np.zeros((Height, Width)) + U0[1]
@@ -16,7 +17,7 @@ Rho = np.ones((Height, Width))
 
 # Зададим свойства шаблона решетки
 
-DirTemp = np.array([
+V = np.array([
     [-1,1],[0,1],[1,1],
     [-1,0],[0,0],[1,0],
     [-1,-1],[0,-1],[1,-1]
@@ -29,37 +30,41 @@ CoefTemp = np.array([
     1/36,1/9,1/36
 ]).reshape((9,1,1))
 
+C = 1/3**0.5
+Tau = Viscosity/C**2 + 0.5                     # параметр релаксации
 
-def URho2F(Ux, Uy, Rho):
-    U_dir = DirTemp[:,0]*Ux + DirTemp[:,1]*Uy
-    U2 = (Ux**2 + Uy**2)
-    return Rho * CoefTemp * (1 + 3*U_dir + 4.5*U_dir**2 - 1.5*U2)
+def F_stat(Ux, Uy, Rho):
+    UV = (V[:,0]*Ux + V[:,1]*Uy)/C**2
+    U2 = (Ux**2 + Uy**2)/C**2
+    return Rho * CoefTemp * (1 + UV + UV**2/2 - U2/2)
 
-
-def F2URho(f):
+def U_Rho(f):
     Rho = f.sum(axis=0)
-    Ux = ((DirTemp[:,0]*f)).sum(axis=0)/Rho
-    Uy = ((DirTemp[:,1]*f)).sum(axis=0)/Rho
-    return Ux, Uy, Rho 
+    Ux = ((V[:,0]*f)).sum(axis=0)/Rho
+    Uy = ((V[:,1]*f)).sum(axis=0)/Rho
+    return Ux, Uy, Rho  
+
+F = F_stat(Ux, Uy, Rho)
+F_0 = F_stat(Ux, Uy, Rho)
 
 
-F = URho2F(Ux, Uy, Rho)
-F0 = URho2F(Ux, Uy, Rho)
-# Инициализируем все массивы для обеспечения равномерного правого потока
+def InitBarrier():
+    # Инициализируем форму барьера
+    barrier = np.zeros((Height,Width), bool)                    
+
+    # True там где барьер
+    # круг
+    for i in range(barrier.shape[0]):
+        for j in range(barrier.shape[1]):
+            if (i - Height//2)**2 + (j - Height//2)**2 < Radius**2:
+                barrier[i,j] = True
+    # хвост
+    # barrier[(Height//2), ((Height//2)):((Height//2)+4*Radius)] = True            # simple linear barrier
+
+    return barrier
 
 
-# Инициализируем форму барьера
-barrier = np.zeros((Height,Width), bool)                    
-
-# True там где барьер
-# круг
-for i in range(barrier.shape[0]):
-    for j in range(barrier.shape[1]):
-        if (i - Height//2)**2 + (j - Height//2)**2 < Radius**2:
-            barrier[i,j] = True
-
-# хвост
-barrier[(Height//2), ((Height//2)):((Height//2)+4*Radius)] = True            # simple linear barrier
+barrier = InitBarrier()
 
 barrierN = np.roll(barrier,  1, axis=0)                    
 barrierS = np.roll(barrier, -1, axis=0)                    
@@ -75,6 +80,8 @@ barrierSW = np.roll(barrierS, -1, axis=1)
 def stream(f):
 
     (fNW, fN, fNE, fW, f0, fE, fSW, fS, fSE) = f
+
+    # fN[1:,:] = fN[:-1,:]
 
     fN  = np.roll(fN,   1, axis=0)    # axis 0 is north-south; + direction is north
 
@@ -111,14 +118,14 @@ def stream(f):
 # Сталкиваем частицы внутри каждой ячейки, чтобы перераспределить скорости
 def collide(f):
 
-    Ux, Uy, Rho = F2URho(f)
+    Ux, Uy, Rho = U_Rho(f)
 
-    f = (1-Tau)*f + Tau * URho2F(Ux, Uy, Rho)
+    f -= (f - F_stat(Ux, Uy, Rho))/Tau
 
-    f[:,0,:] = F0[:,0,:]
-    f[:,-1,:] = F0[:,-1,:]
-    f[:,:,0] = F0[:,:,0]
-    f[:,:,-1] = F0[:,:,-1]
+    f[:,0,:] = F_0[:,0,:]
+    f[:,-1,:] = F_0[:,-1,:]
+    f[:,:,0] = F_0[:,:,0]
+    f[:,:,-1] = F_0[:,:,-1]
 
     return f
 
@@ -145,7 +152,9 @@ def nextFrame(arg):
         F = stream(F)
         F = collide(F)
     
-    Ux, Uy, Rho =  F2URho(F)
+
+    # print(F.min(), F.max())
+    Ux, Uy, Rho =  U_Rho(F)
 
     fluidImage.set_array(curl(Ux, Uy))
     return (fluidImage, barrierImage)        
