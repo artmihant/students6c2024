@@ -45,6 +45,8 @@ def mandelbrot(xmin, xmax, ymin, ymax, width, height):
     tpb = device.WARP_SIZE
     bpg = int(np.ceil((height*width)/tpb)) 
 
+    print(tpb, bpg)
+
     calc_iter[bpg, tpb](d_real, d_imag, d_divergence_step)
 
     divergence_step = d_divergence_step.copy_to_host()

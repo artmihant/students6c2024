@@ -8,7 +8,7 @@ import numba as nb
 Viscosity = 0.01                                # вязкость жидкости
 Height, Width = 80, 200,                          # размеры решетки
 
-U0 = np.array([0.15, 0])                        # начальная и внешняя скорость (в махах)
+U0 = np.array([0.10, 0])                        # начальная и внешняя скорость (в махах)
 
 Ux  = np.zeros((Height, Width)) + U0[0]
 Uy  = np.zeros((Height, Width)) + U0[1]
@@ -23,12 +23,12 @@ def BarrierShape():
     barrier = np.zeros((Height, Width), bool)
 
     # круг
-    for i in range(barrier.shape[0]):
-        for j in range(barrier.shape[1]):
-            if (i - Height//2)**2 + (j - Height//2)**2 < (Height//10)**2:
-                barrier[i,j] = True
+    for y in range(barrier.shape[0]):
+        for x in range(barrier.shape[1]):
+            if (y - Height//2)**2 + (x - Height//2)**2 < (Height//10)**2:
+                barrier[y,x] = True
     # хвост
-    barrier[(Height//2), ((Height//2)):((Height//2)+4*(Height//10))] = True
+    # barrier[(Height//2), ((Height//2)):((Height//2)+4*(Height//10))] = True
 
     return barrier
 
@@ -75,45 +75,47 @@ def InitBarrier():
 
 def F_stat(Ux, Uy, Rho):
     """ Вычисляем статистическое распределение частиц в зависимости от общей скорости и плотности """
-    UV = np.zeros((9, Height, Width)) 
-    for i in range(9):
-        UV[i] = (V[i,0]*Ux + V[i,1]*Uy)/C**2
+    UV = np.zeros((Q, Height, Width)) 
+    for q in range(Q):
+        UV[q] = (V[q,0]*Ux + V[q,1]*Uy)/C**2
 
     U2 = (Ux**2 + Uy**2)/C**2
 
-    f_stat = np.zeros((9, Height, Width))
-    for i in range(9):
-        f_stat[i] = Rho * W[i] * (1 + UV[i] + UV[i]**2/2 - U2/2)
+    f_stat = np.zeros((Q, Height, Width))
+    for q in range(Q):
+        f_stat[q] = Rho * W[q] * (1 + UV[q] + UV[q]**2/2 - U2/2)
 
     return f_stat
 
 def Mode0(f):
     """ Плотность """
     mode = np.zeros((Height, Width))
-    for i in range(9):
-        mode += f[i]
+    for q in range(Q):
+        mode += f[q]
     return mode
 
 def Mode1(f):
     """ Плотность*Скорость """
-    mode = np.zeros((2, Height, Width))
-    for i in range(9):
-        for d1 in range(2):
-            mode[d1] += f[i]*V[i,d1]
+    mode = np.zeros((D, Height, Width))
+    for q in range(Q):
+        for d1 in range(D):
+            mode[d1] += f[q]*V[q,d1]
     return mode
 
 def Mode2(f):
     """ Плотность*[Скорость x Скорость] минус тензор напряжения """
-    mode = np.zeros((2,2,Height, Width))
-    for i in range(9):
-        for d1 in range(2):
-            for d2 in range(2):
-                mode[d1,d2] += f[i]*V[i,d1]*V[i,d2]
+    mode = np.zeros((D,D,Height, Width))
+    for q in range(Q):
+        for d1 in range(D):
+            for d2 in range(D):
+                mode[d1,d2] += f[q]*V[q,d1]*V[q,d2]
     return mode
 
 
 def iter(f, f_out, barrier):
     """stream"""
+    now = time.time()
+
     (fNW, fN, fNE, fW, fC, fE, fSW, fS, fSE) = f
 
     for y in range(Height-1,0,-1):
@@ -121,20 +123,17 @@ def iter(f, f_out, barrier):
         fNE[y] = fNE[y-1]
         fNW[y] = fNW[y-1]
 
-    for y in range(0,Height-1):
-        fS[y]  = fS[y+1]
-        fSE[y] = fSE[y+1]
-        fSW[y] = fSW[y+1]
+    fS[:-1]  = fS[1:]
+    fSE[:-1] = fSE[1:]
+    fSW[:-1] = fSW[1:]
 
-    for x in range(Width-1,0,-1):
-        fE[:,x]  = fE[:,x-1]
-        fNE[:,x] = fNE[:,x-1]
-        fSE[:,x] = fSE[:,x-1]
+    fE[:,1:]  = fE[:,:-1]
+    fNE[:,1:] = fNE[:,:-1]
+    fSE[:,1:] = fSE[:,:-1]
 
-    for x in range(0,Width-1):
-        fW[:,x]  = fW[:,x+1]
-        fNW[:,x] = fNW[:,x+1]
-        fSW[:,x] = fSW[:,x+1]
+    fW[:,:-1]  = fW[:,1:]
+    fNW[:,:-1] = fNW[:,1:]
+    fSW[:,:-1] = fSW[:,1:]
 
     """ BC_barrier """
     (bNW, bN, bNE, bW, bC, bE, bSW, bS, bSE) = barrier
@@ -165,7 +164,7 @@ def iter(f, f_out, barrier):
     f[:,-1,:] = f_out[:,-1,:]
     f[:,:,0] = f_out[:,:,0]
     f[:,:,-1] = f_out[:,:,-1]
-
+    print(time.time()-now)
 
 def curl(ux, uy):
     """ двумерный ротор макроскопического поля скорости """ 
@@ -176,8 +175,11 @@ def main():
     barrier = InitBarrier()
 
     F = F_stat(Ux, Uy, Rho)
-lesson5/fluid/fluidLBM.py
+
     F_out = F_stat(Ux, Uy, Rho)
+
+    for _ in range(100):
+        iter(F, F_out, barrier)
 
     fig, ax = plt.subplots()
 
@@ -191,13 +193,13 @@ lesson5/fluid/fluidLBM.py
 
     def nextFrame(_):
 
-        for i in range(40):
+        for _ in range(40):
             iter(F, F_out, barrier)
 
         Rho = Mode0(F)
         Ux, Uy = Mode1(F)
 
-        E = Mode2(F)
+        # E = Mode2(F)
         Ux /= Rho
         Uy /= Rho
 
