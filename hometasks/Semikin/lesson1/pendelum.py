@@ -107,7 +107,7 @@ def show_pendulum_move():
 
         return (LineTrajectory)
 
-    ani = animation.FuncAnimation(
+    ani = matplotlib.animation.FuncAnimation(
         fig=fig, 
         func=loop_animation, 
         frames=StepsNumber, 
